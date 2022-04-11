@@ -10,9 +10,12 @@ from torch.autograd import Variable
 #seaborn.set_context(context="talk")
 
 import os
+
+from pgportfolio.marketdata.coinlist import CoinList
+
 os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 import pandas as pd
-
+import xarray as xr
 
 
 #DATABASE_DIR="/data2/kaylakxu/PGPortfolio-master/PGPortfolio-master/database/Data.db"
@@ -130,7 +133,8 @@ class HistoryManager:
         self.__checkperiod(period)
 
         time_index = pd.to_datetime(list(range(start, end+1, period)),unit='s')
-        panel = pd.Panel(items=features, major_axis=coins, minor_axis=time_index, dtype=np.float32)
+        # panel = pd.Panel(items=features, major_axis=coins, minor_axis=time_index, dtype=np.float32)
+        panel = xr.DataArray(coords=[features, coins, time_index], dims=['features', 'coins', 'time'])
 
         connection = sqlite3.connect(DATABASE_DIR)
         try:
@@ -176,10 +180,12 @@ class HistoryManager:
                                                     parse_dates=["date_norm"],
                                                     index_col="date_norm")
                     panel.loc[feature, coin, serial_data.index] = serial_data.squeeze()
-                    panel = panel_fillna(panel, "both")
         finally:
             connection.commit()
             connection.close()
+
+        panel = panel_fillna(panel, "both")
+
         return panel
 
     # select top coin_number of coins by volume from start to end
@@ -313,14 +319,15 @@ def panel_fillna(panel, type="bfill"):
     :param panel: the panel to be filled
     :param type: bfill or ffill
     """
-    frames = {}
-    for item in panel.items:
-        if type == "both":
-            frames[item] = panel.loc[item].fillna(axis=1, method="bfill").\
-                fillna(axis=1, method="ffill")
-        else:
-            frames[item] = panel.loc[item].fillna(axis=1, method=type)
-    return pd.Panel(frames)
+    new_panel = panel.copy()
+    for feature in panel.features:
+        for coin in panel.coins:
+            if type == "both":
+                new_panel.loc[feature, coin] = pd.Series(panel.loc[feature, coin]).fillna(method="bfill").\
+                    fillna(method="ffill")
+            else:
+                new_panel.loc[feature, coin] = pd.Series(panel.loc[feature, coin]).fillna(method=type)
+    return new_panel
 
 
 class DataMatrices:
@@ -364,12 +371,12 @@ class DataMatrices:
             raise ValueError("market {} is not valid".format(market))
         self.__period_length = period
         # portfolio vector memory, [time, assets]
-        self.__PVM = pd.DataFrame(index=self.__global_data.minor_axis,
-                                  columns=self.__global_data.major_axis)
+        self.__PVM = pd.DataFrame(index=self.__global_data.time,
+                                  columns=self.__global_data.coins)
         self.__PVM = self.__PVM.fillna(1.0 / self.__coin_no)
 
         self._window_size = window_size
-        self._num_periods = len(self.__global_data.minor_axis)
+        self._num_periods = len(self.__global_data.time)
         self.__divide_data(test_portion, portion_reversed)
 
         self._portion_reversed = portion_reversed
@@ -799,7 +806,8 @@ class MultiHeadedAttention(nn.Module):
             # Same mask applied to all h heads.
             mask = mask.unsqueeze(1)                      # [128,1,1,31]    [128,1,1,1]
             mask = mask.repeat(query.size()[0], 1, 1, 1)  # [128*3,1,1,31]  [128*3,1,1,1]    #[9, 1, 1, 31]
-            mask = mask.cuda()                            
+            # TODO: uncomment the following line for GPU support
+            # mask = mask.cuda()
         q_size0 = query.size(0)  #11
         q_size1 = query.size(1)  #128
         q_size2 = query.size(2)  #31 0r 1
@@ -814,7 +822,9 @@ class MultiHeadedAttention(nn.Module):
             padding_q = padding_price_q
         else:
             if(self.local_context_length>1):
-                padding_q = torch.zeros((q_size1,q_size3,q_size0,self.local_context_length-1)).cuda()
+                padding_q = torch.zeros((q_size1,q_size3,q_size0,self.local_context_length-1))
+                # TODO: Uncomment the following line for GPU support
+                # padding_q = padding_q.cuda()
             else:
                 padding_q = None
         query = query.permute((1,3,0,2))
@@ -852,7 +862,9 @@ class MultiHeadedAttention(nn.Module):
             padding_k=padding_price_k
         else:
             if(self.local_context_length>1):
-                padding_k = torch.zeros((key_size1,key_size3,key_size0,self.local_context_length-1)).cuda()
+                padding_k = torch.zeros((key_size1,key_size3,key_size0,self.local_context_length-1))
+                # TODO: uncomment the following line for GPU support
+                # padding_k = padding_k.cuda()
             else:
                 padding_k = None
         key = key.permute((1,3,0,2)) 
@@ -999,26 +1011,39 @@ class Batch_Loss(nn.Module):
         self.interest_rate=interest_rate
 
 
-    def forward(self, w, y):            # w:[128,1,12]   y:[128,11,4] 
-        close_price=y[:,:,0:1].cuda()   #   [128,11,1]
+    def forward(self, w, y):            # w:[128,1,12]   y:[128,11,4]
+        close_price=y[:,:,0:1]
+        # TODO: Uncomment the following line for GPU support
+        # close_price = close_price.cuda()   #   [128,11,1]
         #future close prise (including cash)
-        close_price=torch.cat([torch.ones(close_price.size()[0],1,1).cuda(),close_price],1).cuda()         #[128,11,1]cat[128,1,1]->[128,12,1]
+        ones = torch.ones(close_price.size()[0],1,1)
+        # TODO: Uncomment the following line for GPU support
+        # ones = ones.cuda()
+        close_price=torch.cat([ones,close_price],1)
+        # TODO: Uncomment the following line for GPU support
+        # close_price = close_price.cuda()         #[128,11,1]cat[128,1,1]->[128,12,1]
         reward=torch.matmul(w,close_price)                                                                 #[128,1,1]
-        close_price=close_price.view(close_price.size()[0],close_price.size()[2],close_price.size()[1])    #[128,1,12] 
+        close_price=close_price.view(close_price.size()[0],close_price.size()[2],close_price.size()[1])    #[128,1,12]
 ###############################################################################################################
         element_reward=w*close_price
-        interest=torch.zeros(element_reward.size(),dtype=torch.float).cuda()
+        interest=torch.zeros(element_reward.size(),dtype=torch.float)
+        # TODO: Uncomment the following line for GPU support
+        # interest = interest.cuda()
         interest[element_reward<0]=element_reward[element_reward<0]
         interest=torch.sum(interest,2).unsqueeze(2)*self.interest_rate  #[128,1,1]
 ###############################################################################################################
-        future_omega=w*close_price/reward  #[128,1,12]           
+        future_omega=w*close_price/reward  #[128,1,12]
         wt=future_omega[:-1]               #[128,1,12]
         wt1=w[1:]                          #[128,1,12]
         pure_pc=1-torch.sum(torch.abs(wt-wt1),-1)*self.commission_ratio   #[128,1]
-        pure_pc=pure_pc.cuda()
-        pure_pc=torch.cat([torch.ones([1,1]).cuda(),pure_pc],0)
+        # TODO: Uncomment the following line for GPU support
+        # pure_pc=pure_pc.cuda()
+        ones = torch.ones([1,1])
+        # TODO: Uncomment the following line for GPU support
+        # ones = ones.cuda()
+        pure_pc=torch.cat([ones,pure_pc],0)
         pure_pc=pure_pc.view(pure_pc.size()[0],1,pure_pc.size()[1])       #[128,1,1]
-        
+
         cost_penalty = torch.sum(torch.abs(wt-wt1),-1)
 ################## Deduct transaction fee ##################
         reward=reward*pure_pc    #reward=pv_vector
@@ -1029,10 +1054,10 @@ class Batch_Loss(nn.Module):
 #####################variance_penalty##############################
 #        variance_penalty = ((torch.log(reward)-torch.log(reward).mean())**2).mean()
         if self.size_average:
-            loss = batch_loss.mean() #+ self.gamma*variance_penalty + self.beta*cost_penalty.mean() 
+            loss = batch_loss.mean() #+ self.gamma*variance_penalty + self.beta*cost_penalty.mean()
             return loss, portfolio_value[0][0]
         else:
-            loss = batch_loss.mean() #+self.gamma*variance_penalty + self.beta*cost_penalty.mean() #(dim=0)                           
+            loss = batch_loss.mean() #+self.gamma*variance_penalty + self.beta*cost_penalty.mean() #(dim=0)
             return loss, portfolio_value[0][0]
 
 class SimpleLossCompute:
@@ -1081,13 +1106,22 @@ class Test_Loss(nn.Module):
         self.interest_rate=interest_rate
 
     def forward(self, w, y):               # w:[128,10,1,12] y(128,10,11,4)
-        close_price = y[:,:,:,0:1].cuda()    #   [128,10,11,1]
-        close_price = torch.cat([torch.ones(close_price.size()[0],close_price.size()[1],1,1).cuda(),close_price],2).cuda()       #[128,10,11,1]cat[128,10,1,1]->[128,10,12,1]
+        close_price = y[:,:,:,0:1]
+        # TODO: Uncomment the following line for GPU support
+        # close_price = close_price.cuda()    #   [128,10,11,1]
+        ones = torch.ones(close_price.size()[0], close_price.size()[1], 1, 1)
+        # TODO: Uncomment the following line for GPU support
+        # ones = ones.cuda()
+        close_price = torch.cat([ones,close_price],2)       #[128,10,11,1]cat[128,10,1,1]->[128,10,12,1]
+        # TODO: Uncomment the following line for GPU support
+        # close_price = close_price.cuda()
         reward = torch.matmul(w,close_price)   #  [128,10,1,12] * [128,10,12,1] ->[128,10,1,1]
         close_price = close_price.view(close_price.size()[0],close_price.size()[1],close_price.size()[3],close_price.size()[2])  #[128,10,12,1] -> [128,10,1,12]
 ##############################################################################
         element_reward = w*close_price
-        interest = torch.zeros(element_reward.size(),dtype = torch.float).cuda()
+        interest = torch.zeros(element_reward.size(),dtype = torch.float)
+        # TODO: Uncomment the following line for GPU support
+        # interest = interest.cuda()
         interest[element_reward<0] = element_reward[element_reward<0]
 #        print("interest:",interest.size(),interest,'\r\n')
         interest = torch.sum(interest,3).unsqueeze(3)*self.interest_rate  #[128,10,1,1]
@@ -1096,8 +1130,12 @@ class Test_Loss(nn.Module):
         wt=future_omega[:,:-1]                 #[128, 9,1,12]   
         wt1=w[:,1:]                            #[128, 9,1,12]
         pure_pc=1-torch.sum(torch.abs(wt-wt1),-1)*self.commission_ratio     #[128,9,1]
-        pure_pc=pure_pc.cuda()
-        pure_pc=torch.cat([torch.ones([pure_pc.size()[0],1,1]).cuda(),pure_pc],1)      #[128,1,1] cat  [128,9,1] ->[128,10,1]        
+        # TODO: Uncomment the following line for GPU support
+        # pure_pc=pure_pc.cuda()
+        ones=torch.ones([pure_pc.size()[0], 1, 1])
+        # TODO: Uncomment the following line for GPU support
+        # ones = ones.cuda()
+        pure_pc=torch.cat([ones,pure_pc],1)      #[128,1,1] cat  [128,9,1] ->[128,10,1]
         pure_pc=pure_pc.view(pure_pc.size()[0],pure_pc.size()[1],1,pure_pc.size()[2])  #[128,10,1] ->[128,10,1,1]          
         cost_penalty = torch.sum(torch.abs(wt-wt1),-1)                                 #[128, 9, 1]      
 ################## Deduct transaction fee ##################
@@ -1166,11 +1204,15 @@ def train_one_step(DM,x_window_size,model,loss_compute,local_context_length):
     batch_last_w = batch["last_w"]  #(128, 11)
     batch_w = batch["setw"]     
 #############################################################################
-    previous_w=torch.tensor(batch_last_w,dtype=torch.float).cuda()
+    previous_w=torch.tensor(batch_last_w,dtype=torch.float)
+    # TODO: uncomment the following line for GPU support
+    # previous_w = previous_w.cuda()
     previous_w=torch.unsqueeze(previous_w,1)                         #[128, 11] -> [128,1,11]
     batch_input=batch_input.transpose((1,0,2,3))
     batch_input=batch_input.transpose((0,1,3,2))
-    src=torch.tensor(batch_input,dtype=torch.float).cuda()   
+    src=torch.tensor(batch_input,dtype=torch.float)
+    # TODO: uncomment the following line for GPU support
+    # src = src.cuda()
     price_series_mask = (torch.ones(src.size()[1],1,x_window_size)==1)   #[128, 1, 31] 
     currt_price=src.permute((3,1,2,0))                                   #[4,128,31,11]->[11,128,31,4]
     if(local_context_length>1):
@@ -1180,7 +1222,9 @@ def train_one_step(DM,x_window_size,model,loss_compute,local_context_length):
     currt_price=currt_price[:,:,-1:,:]                                    #[11,128,31,4]->[11,128,1,4]
     trg_mask = make_std_mask(currt_price,src.size()[1])
     batch_y=batch_y.transpose((0,2,1))                                    #[128, 4, 11] ->#[128,11,4]
-    trg_y=torch.tensor(batch_y,dtype=torch.float).cuda()
+    trg_y=torch.tensor(batch_y,dtype=torch.float)
+    # TODO: Uncomment the following line for GPU support
+    # trg_y = trg_y.cuda()
     out = model.forward(src, currt_price, previous_w,  
                         price_series_mask, trg_mask, padding_price)
     new_w=out[:,:,1:]  #去掉cash
@@ -1199,13 +1243,17 @@ def test_online(DM,x_window_size,model,evaluate_loss_compute,local_context_lengt
     tst_batch_last_w = tst_batch["last_w"]
     tst_batch_w = tst_batch["setw"]
 
-    tst_previous_w=torch.tensor(tst_batch_last_w,dtype=torch.float).cuda()
+    tst_previous_w=torch.tensor(tst_batch_last_w,dtype=torch.float)
+    # TODO: Uncomment the following line for GPU support
+    # tst_previous_w = tst_previous_w.cuda()
     tst_previous_w=torch.unsqueeze(tst_previous_w,1)  
 
     tst_batch_input=tst_batch_input.transpose((1,0,2,3))
     tst_batch_input=tst_batch_input.transpose((0,1,3,2))
 
-    long_term_tst_src=torch.tensor(tst_batch_input,dtype=torch.float).cuda()      
+    long_term_tst_src=torch.tensor(tst_batch_input,dtype=torch.float)
+    # TODO: Uncomment the following line for GPU support
+    # long_term_tst_src = long_term_tst_src.cuda()
 #########################################################################################
     tst_src_mask = (torch.ones(long_term_tst_src.size()[1],1,x_window_size)==1)   
 
@@ -1217,7 +1265,9 @@ def test_online(DM,x_window_size,model,evaluate_loss_compute,local_context_lengt
    
 
     tst_batch_y=tst_batch_y.transpose((0,3,2,1))  
-    tst_trg_y=torch.tensor(tst_batch_y,dtype=torch.float).cuda()
+    tst_trg_y=torch.tensor(tst_batch_y,dtype=torch.float)
+    # TODO: Uncomment the following line for GPU support
+    # tst_trg_y = tst_trg_y.cuda()
     tst_long_term_w=[]  
     tst_y_window_size=len(DM._test_ind)-x_window_size-1-1
     for j in range(tst_y_window_size+1): #0-9
@@ -1289,11 +1339,15 @@ def test_batch(DM,x_window_size,model,evaluate_loss_compute,local_context_length
     tst_batch_last_w = tst_batch["last_w"]
     tst_batch_w = tst_batch["setw"]
 
-    tst_previous_w=torch.tensor(tst_batch_last_w,dtype=torch.float).cuda()
+    tst_previous_w=torch.tensor(tst_batch_last_w,dtype=torch.float)
+    # TODO: Uncomment the following line for GPU support
+    # tst_previous_w = tst_previous_w.cuda()
     tst_previous_w=torch.unsqueeze(tst_previous_w,1)                    #[2426, 1, 11]
     tst_batch_input=tst_batch_input.transpose((1,0,2,3))
     tst_batch_input=tst_batch_input.transpose((0,1,3,2))
-    tst_src=torch.tensor(tst_batch_input,dtype=torch.float).cuda()         
+    tst_src=torch.tensor(tst_batch_input,dtype=torch.float)
+    # TODO: Uncomment the following line for GPU support
+    # tst_src = tst_src.cuda()
     tst_src_mask = (torch.ones(tst_src.size()[1],1,x_window_size)==1)   #[128, 1, 31]   
     tst_currt_price=tst_src.permute((3,1,2,0))                          #(4,128,31,11)->(11,128,31,3)
 #############################################################################
@@ -1306,7 +1360,9 @@ def test_batch(DM,x_window_size,model,evaluate_loss_compute,local_context_length
     tst_currt_price=tst_currt_price[:,:,-1:,:]   #(11,128,31,4)->(11,128,1,4)
     tst_trg_mask = make_std_mask(tst_currt_price,tst_src.size()[1])
     tst_batch_y=tst_batch_y.transpose((0,2,1))   #(128, 4, 11) ->(128,11,4)
-    tst_trg_y=torch.tensor(tst_batch_y,dtype=torch.float).cuda()
+    tst_trg_y=torch.tensor(tst_batch_y,dtype=torch.float)
+    # TODO: Uncomment the following line for GPU support
+    # tst_trg_y=tst_trg_y.cuda()
 ###########################################################################################################
     tst_out = model.forward(tst_src, tst_currt_price, tst_previous_w, #[128,1,11]   [128, 11, 31, 4]) 
                     tst_src_mask, tst_trg_mask,padding_price)
@@ -1361,7 +1417,7 @@ DM=DataMatrices(start=start,end=end,
              market="poloniex",
              feature_number=FLAGS.feature_number,      
              window_size=FLAGS.x_window_size,                            
-             online=False,                            
+             online=True,
              period=1800,                            
              coin_filter=11,                            
              is_permed=False,                           
@@ -1430,7 +1486,8 @@ model = make_model(batch_size, coin_num, x_window_size, feature_number,
                          local_context_length=local_context_length)
 
 #model = make_model3(N=6, d_model=512, d_ff=2048, h=8, dropout=0.1)
-model = model.cuda()
+# TODO: Uncomment for GPU support
+# model = model.cuda()
 #model_size, factor, warmup, optimizer)  
 model_opt = NoamOpt(lr_model_sz, factor, warmup, torch.optim.Adam(model.parameters(), lr=0, betas=(0.9, 0.98), eps=1e-9,weight_decay=weight_decay))
 
