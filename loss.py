@@ -22,25 +22,16 @@ class SimpleLossCompute:
 
 class SimpleLossCompute_tst:
     "A simple loss compute and train function."
-
-    def __init__(self, criterion, opt=None):
+    def __init__(self, criterion):
         self.criterion = criterion
-        self.opt = opt
 
     def __call__(self, x, y):
-        if self.opt is not None:
-            loss, portfolio_value = self.criterion(x, y)
-            loss.backward()
-            self.opt.step()
-            self.opt.optimizer.zero_grad()
-            return loss, portfolio_value
-        else:
-            loss, portfolio_value, SR, CR, St_v, tst_pc_array, TO = self.criterion(x, y)
-            return loss, portfolio_value, SR, CR, St_v, tst_pc_array, TO
+        loss, portfolio_value, SR, CR, St_v, tst_pc_array, TO = self.criterion(x, y)
+        return loss, portfolio_value, SR, CR, St_v, tst_pc_array, TO
 
 
 class Batch_Loss(nn.Module):
-    def __init__(self, commission_ratio, interest_rate, gamma=0.1, beta=0.1, size_average=True):
+    def __init__(self, commission_ratio, interest_rate, device, gamma=0.1, beta=0.1, size_average=True):
         super(Batch_Loss, self).__init__()
         self.gamma = gamma  # variance penalty
         self.beta = beta
@@ -48,20 +39,19 @@ class Batch_Loss(nn.Module):
         self.commission_ratio = commission_ratio
         self.interest_rate = interest_rate
 
+        self.target_device = device
+
     def forward(self, w, y):  # w:[128,1,12]   y:[128,11,4]
         close_price_ratio = y[:, :, 0:1]
-        # TODO: Uncomment the following line for GPU support
-        # close_price = close_price.cuda()   #   [128,11,1]
+        close_price_ratio = close_price_ratio.to(self.target_device)   #   [128,11,1]
         # future close prise (including cash)
         ones = torch.ones(close_price_ratio.size()[0], 1, 1)
-        # TODO: Uncomment the following line for GPU support
-        # ones = ones.cuda()
+        ones = ones.to(self.target_device)
 
         # Add cache close price ratio?
         close_price_ratio = torch.cat([ones, close_price_ratio], 1)
 
-        # TODO: Uncomment the following line for GPU support
-        # close_price = close_price.cuda()         #[128,11,1]cat[128,1,1]->[128,12,1]
+        close_price_ratio = close_price_ratio.to(self.target_device)         #[128,11,1]cat[128,1,1]->[128,12,1]
         reward = torch.matmul(w, close_price_ratio)  # [128,1,1]
 
         close_price_ratio = close_price_ratio.view(close_price_ratio.size()[0], close_price_ratio.size()[2],
@@ -69,8 +59,7 @@ class Batch_Loss(nn.Module):
         ###############################################################################################################
         element_reward = w * close_price_ratio
         interest = torch.zeros(element_reward.size(), dtype=torch.float)
-        # TODO: Uncomment the following line for GPU support
-        # interest = interest.cuda()
+        interest = interest.to(self.target_device)
         interest[element_reward < 0] = element_reward[element_reward < 0]
         interest = torch.sum(interest, 2).unsqueeze(2) * self.interest_rate  # [128,1,1]
         ###############################################################################################################
@@ -78,11 +67,9 @@ class Batch_Loss(nn.Module):
         wt = future_omega[:-1]  # [128,1,12]
         wt1 = w[1:]  # [128,1,12]
         pure_pc = 1 - torch.sum(torch.abs(wt - wt1), -1) * self.commission_ratio  # [128,1]
-        # TODO: Uncomment the following line for GPU support
-        # pure_pc=pure_pc.cuda()
+        pure_pc=pure_pc.to(self.target_device)
         ones = torch.ones([1, 1])
-        # TODO: Uncomment the following line for GPU support
-        # ones = ones.cuda()
+        ones = ones.to(self.target_device)
         pure_pc = torch.cat([ones, pure_pc], 0)
         pure_pc = pure_pc.view(pure_pc.size()[0], 1, pure_pc.size()[1])  # [128,1,1]
 
@@ -104,7 +91,7 @@ class Batch_Loss(nn.Module):
 
 
 class Test_Loss(nn.Module):
-    def __init__(self, commission_ratio, interest_rate, gamma=0.1, beta=0.1, size_average=True):
+    def __init__(self, commission_ratio, interest_rate, device, gamma=0.1, beta=0.1, size_average=True):
         super(Test_Loss, self).__init__()
         self.gamma = gamma  # variance penalty
         self.beta = beta
@@ -112,24 +99,22 @@ class Test_Loss(nn.Module):
         self.commission_ratio = commission_ratio
         self.interest_rate = interest_rate
 
+        self.target_device = device
+
     def forward(self, w, y):  # w:[128,10,1,12] y(128,10,11,4)
         close_price = y[:, :, :, 0:1]
-        # TODO: Uncomment the following line for GPU support
-        # close_price = close_price.cuda()    #   [128,10,11,1]
+        close_price = close_price.to(self.target_device)    #   [128,10,11,1]
         ones = torch.ones(close_price.size()[0], close_price.size()[1], 1, 1)
-        # TODO: Uncomment the following line for GPU support
-        # ones = ones.cuda()
+        ones = ones.to(self.target_device)
         close_price = torch.cat([ones, close_price], 2)  # [128,10,11,1]cat[128,10,1,1]->[128,10,12,1]
-        # TODO: Uncomment the following line for GPU support
-        # close_price = close_price.cuda()
+        close_price = close_price.to(self.target_device)
         reward = torch.matmul(w, close_price)  # [128,10,1,12] * [128,10,12,1] ->[128,10,1,1]
         close_price = close_price.view(close_price.size()[0], close_price.size()[1], close_price.size()[3],
                                        close_price.size()[2])  # [128,10,12,1] -> [128,10,1,12]
         ##############################################################################
         element_reward = w * close_price
         interest = torch.zeros(element_reward.size(), dtype=torch.float)
-        # TODO: Uncomment the following line for GPU support
-        # interest = interest.cuda()
+        interest = interest.to(self.target_device)
         interest[element_reward < 0] = element_reward[element_reward < 0]
         #        print("interest:",interest.size(),interest,'\r\n')
         interest = torch.sum(interest, 3).unsqueeze(3) * self.interest_rate  # [128,10,1,1]
@@ -138,11 +123,9 @@ class Test_Loss(nn.Module):
         wt = future_omega[:, :-1]  # [128, 9,1,12]
         wt1 = w[:, 1:]  # [128, 9,1,12]
         pure_pc = 1 - torch.sum(torch.abs(wt - wt1), -1) * self.commission_ratio  # [128,9,1]
-        # TODO: Uncomment the following line for GPU support
-        # pure_pc=pure_pc.cuda()
+        pure_pc=pure_pc.to(self.target_device)
         ones = torch.ones([pure_pc.size()[0], 1, 1])
-        # TODO: Uncomment the following line for GPU support
-        # ones = ones.cuda()
+        ones = ones.to(self.target_device)
         pure_pc = torch.cat([ones, pure_pc], 1)  # [128,1,1] cat  [128,9,1] ->[128,10,1]
         pure_pc = pure_pc.view(pure_pc.size()[0], pure_pc.size()[1], 1,
                                pure_pc.size()[2])  # [128,10,1] ->[128,10,1,1]

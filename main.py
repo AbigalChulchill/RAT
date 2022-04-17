@@ -79,7 +79,6 @@ class NoamOpt:
                     min(step ** (-0.5), step * self.warmup ** (-1.5)))
 
 
-
 start = parse_time(FLAGS.start)
 end = parse_time(FLAGS.end)
 DM = DataMatrices(start=start, end=end,
@@ -116,6 +115,8 @@ model_dim = FLAGS.model_dim
 weight_decay = FLAGS.weight_decay
 interest_rate = FLAGS.daily_interest_rate / 24 / 2
 
+device = "cpu"
+
 model = make_model(batch_size, coin_num, x_window_size, feature_number,
                    N=1, d_model_Encoder=FLAGS.multihead_num * model_dim,
                    d_model_Decoder=FLAGS.multihead_num * model_dim,
@@ -123,32 +124,34 @@ model = make_model(batch_size, coin_num, x_window_size, feature_number,
                    d_ff_Decoder=FLAGS.multihead_num * model_dim,
                    h=FLAGS.multihead_num,
                    dropout=0.01,
-                   local_context_length=local_context_length)
+                   local_context_length=local_context_length,
+                   device=device)
 
 # model = make_model3(N=6, d_model=512, d_ff=2048, h=8, dropout=0.1)
-# TODO: Uncomment for GPU support
-# model = model.cuda()
 # model_size, factor, warmup, optimizer)
 model_opt = NoamOpt(lr_model_sz, factor, warmup,
                     torch.optim.Adam(model.parameters(), lr=0, betas=(0.9, 0.98), eps=1e-9, weight_decay=weight_decay))
 
-loss_compute = SimpleLossCompute(Batch_Loss(trading_consumption, interest_rate, variance_penalty, cost_penalty, True),
-                                 model_opt)
+loss_compute = SimpleLossCompute(
+    Batch_Loss(trading_consumption, interest_rate, device, variance_penalty, cost_penalty, True),
+    model_opt)
 evaluate_loss_compute = SimpleLossCompute(
-    Batch_Loss(trading_consumption, interest_rate, variance_penalty, cost_penalty, False), None)
+    Batch_Loss(trading_consumption, interest_rate, device, variance_penalty, cost_penalty, False), None)
 test_loss_compute = SimpleLossCompute_tst(
-    Test_Loss(trading_consumption, interest_rate, variance_penalty, cost_penalty, False), None)
+    Test_Loss(trading_consumption, interest_rate, device, variance_penalty, cost_penalty, False))
 
 ##########################train net####################################################
 tst_loss, tst_portfolio_value = train_net(DM, total_step, output_step, x_window_size, local_context_length, model,
-                                          FLAGS.model_dir, FLAGS.model_index, loss_compute, evaluate_loss_compute, True,
-                                          True)
+                                          FLAGS.model_dir, FLAGS.model_index, loss_compute, evaluate_loss_compute,
+                                          device, True, True)
 
 model = torch.load(FLAGS.model_dir + '/' + str(FLAGS.model_index) + '.pkl')
 
+model = model.to(device)
+
 ##########################test net#####################################################
 tst_portfolio_value, SR, CR, St_v, tst_pc_array, TO = test_net(DM, 1, 1, x_window_size, local_context_length, model,
-                                                               loss_compute, test_loss_compute, False, True)
+                                                               loss_compute, test_loss_compute, device, False, True)
 
 csv_dir = FLAGS.log_dir + "/" + "train_summary.csv"
 d = {"net_dir": [FLAGS.model_index],
