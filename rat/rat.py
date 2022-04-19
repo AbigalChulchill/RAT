@@ -8,12 +8,12 @@ from torch.autograd import Variable
 
 def make_model(batch_size, coin_num, window_size, feature_number, N=6,
                d_model_Encoder=512, d_model_Decoder=16, d_ff_Encoder=2048, d_ff_Decoder=64, h=8, dropout=0.0,
-               local_context_length=3, device="cpu"):
+               local_context_length=3):
     "Helper: Construct a model from hyperparameters."
     c = copy.deepcopy
-    attn_Encoder = MultiHeadedAttention(True, h, d_model_Encoder, 0.1, local_context_length, device)
-    attn_Decoder = MultiHeadedAttention(True, h, d_model_Decoder, 0.1, local_context_length, device)
-    attn_En_Decoder = MultiHeadedAttention(False, h, d_model_Decoder, 0.1, 1, device)
+    attn_Encoder = MultiHeadedAttention(True, h, d_model_Encoder, 0.1, local_context_length)
+    attn_Decoder = MultiHeadedAttention(True, h, d_model_Decoder, 0.1, local_context_length)
+    attn_En_Decoder = MultiHeadedAttention(False, h, d_model_Decoder, 0.1, 1)
     ff_Encoder = PositionwiseFeedForward(d_model_Encoder, d_ff_Encoder, dropout)
     ff_Decoder = PositionwiseFeedForward(d_model_Decoder, d_ff_Decoder, dropout)
     position_Encoder = PositionalEncoding(d_model_Encoder, 0, dropout)
@@ -30,18 +30,14 @@ def make_model(batch_size, coin_num, window_size, feature_number, N=6,
         if p.dim() > 1:
             nn.init.xavier_uniform_(p)
 
-    model = model.to(device)
-
     return model
 
 
 class MultiHeadedAttention(nn.Module):
-    def __init__(self, asset_atten, h, d_model, dropout, local_context_length, device):
+    def __init__(self, asset_atten, h, d_model, dropout, local_context_length):
         "Take in model size and number of heads."
         super(MultiHeadedAttention, self).__init__()
         assert d_model % h == 0
-
-        self.target_device = device
 
         # We assume d_v always equals d_k
         self.d_k = d_model // h
@@ -62,13 +58,15 @@ class MultiHeadedAttention(nn.Module):
         self.asset_atten = asset_atten
 
     def forward(self, query, key, value, mask, padding_price_q, padding_price_k):
+        device = next(self.parameters()).device
+
         # query [4,128,1,2*12] or (4,128,31,2*12) key, value(4,128,31,2*12)
         "Implements Figure 2"
         if mask is not None:
             # Same mask applied to all h heads.
             mask = mask.unsqueeze(1)  # [128,1,1,31]    [128,1,1,1]
             mask = mask.repeat(query.size()[0], 1, 1, 1)  # [128*3,1,1,31]  [128*3,1,1,1]    #[9, 1, 1, 31]
-            mask = mask.to(self.target_device)
+            mask = mask.to(device)
         q_size0 = query.size(0)  # 11
         q_size1 = query.size(1)  # 128
         q_size2 = query.size(2)  # 31 0r 1
@@ -84,7 +82,7 @@ class MultiHeadedAttention(nn.Module):
         else:
             if (self.local_context_length > 1):
                 padding_q = torch.zeros((q_size1, q_size3, q_size0, self.local_context_length - 1))
-                padding_q = padding_q.to(self.target_device)
+                padding_q = padding_q.to(device)
             else:
                 padding_q = None
         query = query.permute((1, 3, 0, 2))
@@ -127,7 +125,7 @@ class MultiHeadedAttention(nn.Module):
         else:
             if (self.local_context_length > 1):
                 padding_k = torch.zeros((key_size1, key_size3, key_size0, self.local_context_length - 1))
-                padding_k = padding_k.to(self.target_device)
+                padding_k = padding_k.to(device)
             else:
                 padding_k = None
         key = key.permute((1, 3, 0, 2))

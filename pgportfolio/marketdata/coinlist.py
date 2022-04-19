@@ -12,7 +12,7 @@ from utils.constants import DAY
 
 class CoinList(object):
     def __init__(self, cash_coin, end, volume_average_days=1, volume_forward=0):
-        self._polo = Poloniex()
+        self._polo = Poloniex(APIKey='HJ6H7Y8P-GPF196RJ-QMCXLXI1-045JK87V', Secret='a73df0ce4cddc0588ba8682682e08ec716dcf135b89f0c32a70661fb933cad8e1b08217d53e916aadf3a41887841d74674a6db706771902c27662f301b4c030f')
         # connect the internet to accees volumes
         vol = self._polo.marketVolume()
         ticker = self._polo.marketTicker()

@@ -151,7 +151,7 @@ model = model.to(device)
 
 ##########################test net#####################################################
 tst_portfolio_value, SR, CR, St_v, tst_pc_array, TO = test_net(DM, 1, 1, x_window_size, local_context_length, model,
-                                                               loss_compute, test_loss_compute, device, False, True)
+                                                               test_loss_compute, device, True)
 
 csv_dir = FLAGS.log_dir + "/" + "train_summary.csv"
 d = {"net_dir": [FLAGS.model_index],

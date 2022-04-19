@@ -91,8 +91,8 @@ def test_online(DM, x_window_size, model, evaluate_loss_compute, local_context_l
     return tst_loss, tst_portfolio_value, SR, CR, St_v, tst_pc_array, TO
 
 
-def test_net(DM, total_step, output_step, x_window_size, local_context_length, model, loss_compute,
-             evaluate_loss_compute, device, is_trn=True, evaluate=True):
+def test_net(DM, total_step, output_step, x_window_size, local_context_length, model,
+             evaluate_loss_compute, device, evaluate=True):
     "Standard Training and Logging Function"
     start = time.time()
     total_tokens = 0
@@ -101,35 +101,25 @@ def test_net(DM, total_step, output_step, x_window_size, local_context_length, m
     ####每个epoch开始时previous_w=0
     max_tst_portfolio_value = 0
 
-    for i in range(total_step):
-        if (is_trn):
-            loss, portfolio_value = train_one_step(DM, x_window_size, model, loss_compute, local_context_length, device)
-            total_loss += loss.item()
-        if (i % output_step == 0 and is_trn):
-            elapsed = time.time() - start
-            print("Epoch Step: %d| Loss per batch: %f| Portfolio_Value: %f | batch per Sec: %f \r\n" %
-                  (i, loss.item(), portfolio_value.item(), output_step / elapsed))
-            start = time.time()
-        #########################################################tst########################################################
-        with torch.no_grad():
-            if (i % output_step == 0 and evaluate):
-                model.eval()
-                tst_loss, tst_portfolio_value, SR, CR, St_v, tst_pc_array, TO = test_online(DM, x_window_size, model,
-                                                                                            evaluate_loss_compute,
-                                                                                            local_context_length,
-                                                                                            device)
-                elapsed = time.time() - start
-                print("Test: %d Loss: %f| Portfolio_Value: %f | SR: %f | CR: %f | TO: %f |testset per Sec: %f" %
-                      (i, tst_loss.item(), tst_portfolio_value.item(), SR.item(), CR.item(), TO.item(), 1 / elapsed))
-                start = time.time()
-                #                portfolio_value_list.append(portfolio_value.item())
+    #########################################################tst########################################################
+    with torch.no_grad():
+        model.eval()
+        tst_loss, tst_portfolio_value, SR, CR, St_v, tst_pc_array, TO = test_online(DM, x_window_size, model,
+                                                                                    evaluate_loss_compute,
+                                                                                    local_context_length,
+                                                                                    device)
+        elapsed = time.time() - start
+        print("Test Loss: %f| Portfolio_Value: %f | SR: %f | CR: %f | TO: %f |testset per Sec: %f" %
+              (tst_loss.item(), tst_portfolio_value.item(), SR.item(), CR.item(), TO.item(), 1 / elapsed))
+        start = time.time()
+        #                portfolio_value_list.append(portfolio_value.item())
 
-                if (tst_portfolio_value > max_tst_portfolio_value):
-                    max_tst_portfolio_value = tst_portfolio_value
-                    log_SR = SR
-                    log_CR = CR
-                    log_St_v = St_v
-                    log_tst_pc_array = tst_pc_array
+        if (tst_portfolio_value > max_tst_portfolio_value):
+            max_tst_portfolio_value = tst_portfolio_value
+            log_SR = SR
+            log_CR = CR
+            log_St_v = St_v
+            log_tst_pc_array = tst_pc_array
     return max_tst_portfolio_value, log_SR, log_CR, log_St_v, log_tst_pc_array, TO
 
 def test_episode(DM, x_window_size, model, evaluate_loss_compute, local_context_length, device):
