@@ -111,14 +111,13 @@ def test_net(DM, total_step, output_step, x_window_size, local_context_length, m
                   (i, loss.item(), portfolio_value.item(), output_step / elapsed))
             start = time.time()
         #########################################################tst########################################################
-        tst_total_loss = 0
         with torch.no_grad():
             if (i % output_step == 0 and evaluate):
                 model.eval()
                 tst_loss, tst_portfolio_value, SR, CR, St_v, tst_pc_array, TO = test_online(DM, x_window_size, model,
                                                                                             evaluate_loss_compute,
-                                                                                            local_context_length)
-                tst_total_loss += tst_loss.item()
+                                                                                            local_context_length,
+                                                                                            device)
                 elapsed = time.time() - start
                 print("Test: %d Loss: %f| Portfolio_Value: %f | SR: %f | CR: %f | TO: %f |testset per Sec: %f" %
                       (i, tst_loss.item(), tst_portfolio_value.item(), SR.item(), CR.item(), TO.item(), 1 / elapsed))
@@ -133,6 +132,56 @@ def test_net(DM, total_step, output_step, x_window_size, local_context_length, m
                     log_tst_pc_array = tst_pc_array
     return max_tst_portfolio_value, log_SR, log_CR, log_St_v, log_tst_pc_array, TO
 
+def test_episode(DM, x_window_size, model, evaluate_loss_compute, local_context_length, device):
+    test_set = DM.get_test_set()
+    test_set_input = test_set["X"]  # (TEST_SET_SIZE, 4, 11, 31)
+    test_set_y = test_set["y"]
+
+    test_previous_w = torch.zeros([1, 1, test_set_input.shape[2]])
+
+    losses = []
+    portfolio_values = []
+
+    for i in range(len(test_set_input)):
+        tst_batch_input = test_set_input[i:i + 1]  # (1, 4, 11, 31)
+
+        test_batch_y = test_set_y[i:i + 1]
+
+        test_previous_w = test_previous_w.to(device)
+        # test_previous_w = torch.unsqueeze(test_previous_w, 1)  # [2426, 1, 11]
+        tst_batch_input = tst_batch_input.transpose((1, 0, 2, 3))
+        tst_batch_input = tst_batch_input.transpose((0, 1, 3, 2))
+        tst_src = torch.tensor(tst_batch_input, dtype=torch.float)
+        tst_src = tst_src.to(device)
+        tst_src_mask = (torch.ones(tst_src.size()[1], 1, x_window_size) == 1)  # [128, 1, 31]
+        tst_currt_price = tst_src.permute((3, 1, 2, 0))  # (4,128,31,11)->(11,128,31,3)
+        #############################################################################
+        if (local_context_length > 1):
+            padding_price = tst_currt_price[:, :, -(local_context_length) * 2 + 1:-1, :]  # (11,128,8,4)
+        else:
+            padding_price = None
+        #########################################################################
+
+        tst_currt_price = tst_currt_price[:, :, -1:, :]  # (11,128,31,4)->(11,128,1,4)
+        tst_trg_mask = make_std_mask(tst_currt_price, tst_src.size()[1])
+        test_batch_y = test_batch_y.transpose((0, 2, 1))  # (128, 4, 11) ->(128,11,4)
+        tst_trg_y = torch.tensor(test_batch_y, dtype=torch.float)
+        tst_trg_y = tst_trg_y.to(device)
+        ###########################################################################################################
+        tst_out = model.forward(tst_src, tst_currt_price, test_previous_w,  # [128,1,11]   [128, 11, 31, 4])
+                                tst_src_mask, tst_trg_mask, padding_price)
+
+        tst_loss, tst_portfolio_value = evaluate_loss_compute(tst_out, tst_trg_y)
+
+        tst_loss = tst_loss.item()
+        losses.append(tst_loss)
+        portfolio_values.append(tst_portfolio_value)
+
+        # exclude the cash
+        test_previous_w = tst_out[:, :, 1:]
+
+    return np.mean(losses), np.prod(portfolio_values)
+
 
 def test_batch(DM, x_window_size, model, evaluate_loss_compute, local_context_length, device):
     tst_batch = DM.get_test_set()
@@ -144,11 +193,15 @@ def test_batch(DM, x_window_size, model, evaluate_loss_compute, local_context_le
     tst_previous_w = torch.tensor(tst_batch_last_w, dtype=torch.float)
     tst_previous_w = tst_previous_w.to(device)
     tst_previous_w = torch.unsqueeze(tst_previous_w, 1)  # [2426, 1, 11]
+
     tst_batch_input = tst_batch_input.transpose((1, 0, 2, 3))
     tst_batch_input = tst_batch_input.transpose((0, 1, 3, 2))
+
     tst_src = torch.tensor(tst_batch_input, dtype=torch.float)
     tst_src = tst_src.to(device)
+
     tst_src_mask = (torch.ones(tst_src.size()[1], 1, x_window_size) == 1)  # [128, 1, 31]
+
     tst_currt_price = tst_src.permute((3, 1, 2, 0))  # (4,128,31,11)->(11,128,31,3)
     #############################################################################
     if (local_context_length > 1):
@@ -170,6 +223,7 @@ def test_batch(DM, x_window_size, model, evaluate_loss_compute, local_context_le
     return tst_loss, tst_portfolio_value
 
 
+
 def train_net(DM, total_step, output_step, x_window_size, local_context_length, model, model_dir, model_index,
               loss_compute, evaluate_loss_compute, device, is_trn=True, evaluate=True):
     "Standard Training and Logging Function"
@@ -179,6 +233,7 @@ def train_net(DM, total_step, output_step, x_window_size, local_context_length, 
     tokens = 0
     ####每个epoch开始时previous_w=0
     max_tst_portfolio_value = 0
+
     for i in range(total_step):
         if (is_trn):
             model.train()
@@ -190,17 +245,15 @@ def train_net(DM, total_step, output_step, x_window_size, local_context_length, 
                   (i, loss.item(), portfolio_value.item(), output_step / elapsed))
             start = time.time()
         #########################################################tst########################################################
-        tst_total_loss = 0
         with torch.no_grad():
             if (i % output_step == 0 and evaluate):
                 model.eval()
                 tst_loss, tst_portfolio_value = test_batch(DM, x_window_size, model, evaluate_loss_compute,
                                                            local_context_length, device)
                 #                tst_loss, tst_portfolio_value=evaluate_loss_compute(tst_out,tst_trg_y)
-                tst_total_loss += tst_loss.item()
                 elapsed = time.time() - start
                 print("Test: %d Loss: %f| Portfolio_Value: %f | testset per Sec: %f \r\n" %
-                      (i, tst_loss.item(), tst_portfolio_value.item(), 1 / elapsed))
+                      (i, tst_loss, tst_portfolio_value.item(), 1 / elapsed))
                 start = time.time()
 
                 if (tst_portfolio_value > max_tst_portfolio_value):

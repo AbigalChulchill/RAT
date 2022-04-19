@@ -18,7 +18,7 @@ class HistoryManager:
         self._coin_number = coin_number
         self._online = online
         if self._online:
-            self._coin_list = CoinList(end, volume_average_days, volume_forward)
+            self._coin_list = CoinList('BTC', end, volume_average_days, volume_forward)
         self.__volume_forward = volume_forward
         self.__volume_average_days = volume_average_days
         self.__coins = None

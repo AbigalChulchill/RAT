@@ -11,7 +11,7 @@ from utils.constants import DAY
 
 
 class CoinList(object):
-    def __init__(self, end, volume_average_days=1, volume_forward=0):
+    def __init__(self, cash_coin, end, volume_average_days=1, volume_forward=0):
         self._polo = Poloniex()
         # connect the internet to accees volumes
         vol = self._polo.marketVolume()
@@ -21,17 +21,19 @@ class CoinList(object):
         volumes = []
         prices = []
 
+        self._cash_coin = cash_coin
+
         logging.info("select coin online from %s to %s" % (datetime.fromtimestamp(end-(DAY*volume_average_days)-
                                                                                   volume_forward).
                                                            strftime('%Y-%m-%d %H:%M'),
                                                            datetime.fromtimestamp(end-volume_forward).
                                                            strftime('%Y-%m-%d %H:%M')))
         for k, v in vol.items():
-            if k.startswith("BTC_") or k.endswith("_BTC"):
+            if k.startswith(f"{self._cash_coin}_") or k.endswith(f"_{self._cash_coin}"):
                 pairs.append(k)
                 for c, val in v.items():
-                    if c != 'BTC':
-                        if k.endswith('_BTC'):
+                    if c != self._cash_coin:
+                        if k.endswith(f'_{self._cash_coin}'):
                             coins.append('reversed_' + c)
                             prices.append(1.0 / float(ticker[k]['last']))
                         else:
@@ -66,7 +68,7 @@ class CoinList(object):
         chart = self.get_chart_until_success(pair=pair, period=DAY, start=start, end=end)
         result = 0
         for one_day in chart:
-            if pair.startswith("BTC_"):
+            if pair.startswith(f"{self._cash_coin}_"):
                 result += one_day['volume']
             else:
                 result += one_day["quoteVolume"]
