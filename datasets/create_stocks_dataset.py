@@ -6,7 +6,8 @@ import xarray as xr
 datadir = "../data/stocks/12_stocks_30min_2022-0419"
 output_file = f"{datadir}.nc"
 
-features = ['high', 'low', 'open', 'close', 'volume']
+# IMPORTANT: The order of the features is important - the model looks for the first feature to be the close price!
+features = ['close', 'high', 'low', 'open',  'volume']
 symbols = []
 times = set()
 

@@ -55,8 +55,9 @@ class HistoryManager:
         coins = self.select_coins(start=end - self.__volume_forward - self.__volume_average_days * DAY,
                                   end=end - self.__volume_forward)
         self.__coins = coins
-        for coin in coins:
-            self.update_data(start, end, coin)
+        if self._online:
+            for coin in coins:
+                self.update_data(start, end, coin)
 
         if len(coins) != self._coin_number:
             raise ValueError("the length of selected coins %d is not equal to expected %d"
