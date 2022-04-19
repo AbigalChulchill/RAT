@@ -248,6 +248,24 @@ def train_net(DM, total_step, output_step, x_window_size, local_context_length, 
         with torch.no_grad():
             if (i % output_step == 0 and evaluate):
                 model.eval()
+                # tst_loss, tst_portfolio_value, SR, CR, St_v, tst_pc_array, TO = test_online(DM, x_window_size, model,
+                #                                                                             evaluate_loss_compute,
+                #                                                                             local_context_length,
+                #                                                                             device)
+                # elapsed = time.time() - start
+                # print("Test: %d Loss: %f| Portfolio_Value: %f | SR: %f | CR: %f | TO: %f |testset per Sec: %f" %
+                #       (i, tst_loss.item(), tst_portfolio_value.item(), SR.item(), CR.item(), TO.item(), 1 / elapsed))
+                # start = time.time()
+                # #                portfolio_value_list.append(portfolio_value.item())
+                #
+                # if (tst_portfolio_value > max_tst_portfolio_value):
+                #     max_tst_portfolio_value = tst_portfolio_value
+                #     log_SR = SR
+                #     log_CR = CR
+                #     log_St_v = St_v
+                #     log_tst_pc_array = tst_pc_array
+                #     torch.save(model, model_dir + '/' + str(model_index) + ".pkl")
+
                 tst_loss, tst_portfolio_value = test_batch(DM, x_window_size, model, evaluate_loss_compute,
                                                            local_context_length, device)
                 #                tst_loss, tst_portfolio_value=evaluate_loss_compute(tst_out,tst_trg_y)

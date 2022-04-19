@@ -14,16 +14,16 @@ from rat.rat import make_model
 from utils.train_test_utils import train_net, test_net
 import pandas as pd
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+# os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 
 @dataclass
 class Parameters:
-    total_step = 1
-    x_window_size = 31
+    total_step = 100000
+    x_window_size = 48
     batch_size = 128
     feature_number = 4
-    output_step = 1000
+    output_step = 50
     model_index = 1
     multihead_num = 2
     local_context_length = 5
@@ -38,8 +38,8 @@ class Parameters:
     daily_interest_rate = 0.001
 
     model_name = 'RAT'
-    log_dir = '/home/tisho/PGPortfolio-master/PGPortfolio-master/pgportfolio/RAT/log/RAT_xws_31_yws__bz_128_mh_2_lcl_5_md_12_wd_5e-8_dir_0.001'
-    model_dir = '/home/tisho/PGPortfolio-master/PGPortfolio-master/pgportfolio/RAT/model/RAT_xws_31_yws__bz_128_mh_2_lcl_5_md_12_wd_5e-8_dir_0.001'
+    log_dir = './output/logs/'
+    model_dir = './output/models/'
 
 
 FLAGS = Parameters()
@@ -77,8 +77,10 @@ class NoamOpt:
                    (self.model_size ** (-0.5) *
                     min(step ** (-0.5), step * self.warmup ** (-1.5)))
 
+os.makedirs(FLAGS.log_dir, exist_ok=True)
+os.makedirs(FLAGS.model_dir, exist_ok=True)
 
-DM = DataMatricesNew(dataset_file='./data/stocks/12_stocks_1min_2022-0419.nc',
+DM = DataMatricesNew(dataset_file='./data/stocks/12_stocks_30min_2022-0419.nc',
                      feature_number=FLAGS.feature_number,
                      window_size=FLAGS.x_window_size,
                      is_permed=False,
@@ -107,7 +109,10 @@ model_dim = FLAGS.model_dim
 weight_decay = FLAGS.weight_decay
 interest_rate = FLAGS.daily_interest_rate / 24 / 2
 
-device = "cpu"
+if torch.cuda.is_available():
+    device = 'cuda'
+else:
+    device = "cpu"
 
 model = make_model(batch_size, coin_num, x_window_size, feature_number,
                    N=1, d_model_Encoder=FLAGS.multihead_num * model_dim,
