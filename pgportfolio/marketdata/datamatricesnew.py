@@ -9,11 +9,14 @@ from pgportfolio.tools.data import get_type_list, panel_fillna
 
 class DataMatricesNew:
     def __init__(self, dataset_file, batch_size=50, buffer_bias_ratio=0,
-                 window_size=50, feature_number=3, test_portion=0.15,
+                 window_size=50, feature_number=3,
+                 validation_portion=0.15,
+                 test_portion=0.15,
                  portion_reversed=False, is_permed=False):
         """
         :param window_size: periods of input data
         :param is_permed: if False, the sample inside a mini-batch is in order
+        :param validation_portion: portion of test set
         :param test_portion: portion of test set
         :param portion_reversed: if False, the order to sets are [train, validation, test]
         else the order is [test, validation, train]
@@ -36,7 +39,7 @@ class DataMatricesNew:
 
         self._window_size = window_size
         self._num_periods = len(self.__global_data.time)
-        self.__divide_data(test_portion, portion_reversed)
+        self.__divide_data(validation_portion, test_portion, portion_reversed)
 
         self._portion_reversed = portion_reversed
         self.__is_permed = is_permed
@@ -54,6 +57,7 @@ class DataMatricesNew:
         print("the number of training examples is %s"
               ", of test examples is %s" % (self._num_train_samples, self._num_test_samples))
         print("the training set is from %s to %s" % (min(self._train_ind), max(self._train_ind)))
+        print("the validation set is from %s to %s" % (min(self._validation_ind), max(self._validation_ind)))
         print("the test set is from %s to %s" % (min(self._test_ind), max(self._test_ind)))
 
     @property
@@ -71,7 +75,7 @@ class DataMatricesNew:
         train_config = config["training"]
         start = parse_time(input_config["start_date"])
         end = parse_time(input_config["end_date"])
-        return DataMatrices(start=start,
+        return DataMatricesNew(start=start,
                             end=end,
                             market=input_config["market"],
                             feature_number=input_config["feature_number"],
@@ -104,6 +108,10 @@ class DataMatricesNew:
         return self._test_ind[:-(self._window_size + 1):]
 
     @property
+    def validation_indices(self):
+        return self._validation_ind[:-(self._window_size + 1):]
+
+    @property
     def num_test_samples(self):
         return self._num_test_samples
 
@@ -119,6 +127,9 @@ class DataMatricesNew:
 
     def get_test_set(self):
         return self.__pack_samples(self.test_indices)
+
+    def get_validation_set(self):
+        return self.__pack_samples(self.validation_indices)
 
     def get_test_set_online(self, ind_start, ind_end, x_window_size):
         return self.__pack_samples_test_online(ind_start, ind_end, x_window_size)
@@ -174,23 +185,26 @@ class DataMatricesNew:
     def get_submatrix_test_online(self, ind_start, ind_end):
         return self.__global_data.values[:, :, ind_start:ind_end]
 
-    def __divide_data(self, test_portion, portion_reversed):
-        train_portion = 1 - test_portion
-        s = float(train_portion + test_portion)
+    def __divide_data(self, validation_portion, test_portion, portion_reversed):
+        train_portion = 1 - (validation_portion + test_portion)
+        s = float(train_portion + validation_portion + test_portion)
         if portion_reversed:
-            portions = np.array([test_portion]) / s
+            portions = np.array([test_portion, validation_portion]) / s
             portion_split = (portions * self._num_periods).astype(int)
+            portion_split[1] = portion_split[0] + portion_split[1]
             indices = np.arange(self._num_periods)
-            self._test_ind, self._train_ind = np.split(indices, portion_split)
+            self._test_ind, self._validation_ind, self._train_ind = np.split(indices, portion_split)
         else:
-            portions = np.array([train_portion]) / s
+            portions = np.array([train_portion, validation_portion]) / s
             portion_split = (portions * self._num_periods).astype(int)
+            portion_split[1] = portion_split[0] + portion_split[1]
             indices = np.arange(self._num_periods)
-            self._train_ind, self._test_ind = np.split(indices, portion_split)
+            self._train_ind, self._validation_ind, self._test_ind = np.split(indices, portion_split)
 
         self._train_ind = self._train_ind[:-(self._window_size + 1)]
         # NOTE(zhengyao): change the logic here in order to fit both
         # reversed and normal version
         self._train_ind = list(self._train_ind)
         self._num_train_samples = len(self._train_ind)
+        self._num_validation_samples = len(self.validation_indices)
         self._num_test_samples = len(self.test_indices)

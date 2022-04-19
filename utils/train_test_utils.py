@@ -1,6 +1,9 @@
+from datetime import datetime
+
 import torch
 import time
 import numpy as np
+import pandas as pd
 
 
 def train_one_step(DM, x_window_size, model, loss_compute, local_context_length, device):
@@ -122,8 +125,9 @@ def test_net(DM, total_step, output_step, x_window_size, local_context_length, m
             log_tst_pc_array = tst_pc_array
     return max_tst_portfolio_value, log_SR, log_CR, log_St_v, log_tst_pc_array, TO
 
+
 def test_episode(DM, x_window_size, model, evaluate_loss_compute, local_context_length, device):
-    test_set = DM.get_test_set()
+    test_set = DM.get_validation_set()
     test_set_input = test_set["X"]  # (TEST_SET_SIZE, 4, 11, 31)
     test_set_y = test_set["y"]
 
@@ -174,7 +178,7 @@ def test_episode(DM, x_window_size, model, evaluate_loss_compute, local_context_
 
 
 def test_batch(DM, x_window_size, model, evaluate_loss_compute, local_context_length, device):
-    tst_batch = DM.get_test_set()
+    tst_batch = DM.get_validation_set()
     tst_batch_input = tst_batch["X"]  # (128, 4, 11, 31)
     tst_batch_y = tst_batch["y"]
     tst_batch_last_w = tst_batch["last_w"]
@@ -204,7 +208,7 @@ def test_batch(DM, x_window_size, model, evaluate_loss_compute, local_context_le
     tst_trg_mask = make_std_mask(tst_currt_price, tst_src.size()[1])
     tst_batch_y = tst_batch_y.transpose((0, 2, 1))  # (128, 4, 11) ->(128,11,4)
     tst_trg_y = torch.tensor(tst_batch_y, dtype=torch.float)
-    tst_trg_y=tst_trg_y.to(device)
+    tst_trg_y = tst_trg_y.to(device)
     ###########################################################################################################
     tst_out = model.forward(tst_src, tst_currt_price, tst_previous_w,  # [128,1,11]   [128, 11, 31, 4])
                             tst_src_mask, tst_trg_mask, padding_price)
@@ -213,62 +217,51 @@ def test_batch(DM, x_window_size, model, evaluate_loss_compute, local_context_le
     return tst_loss, tst_portfolio_value
 
 
-
-def train_net(DM, total_step, output_step, x_window_size, local_context_length, model, model_dir, model_index,
-              loss_compute, evaluate_loss_compute, device, is_trn=True, evaluate=True):
+def train_net(DM, total_step, output_step, x_window_size, local_context_length, model, output_dir,
+              loss_compute, evaluate_loss_compute, device):
     "Standard Training and Logging Function"
     start = time.time()
-    total_tokens = 0
-    total_loss = 0
-    tokens = 0
+    # total_loss = 0
     ####每个epoch开始时previous_w=0
     max_tst_portfolio_value = 0
 
+    log = []
+
     for i in range(total_step):
-        if (is_trn):
-            model.train()
-            loss, portfolio_value = train_one_step(DM, x_window_size, model, loss_compute, local_context_length, device)
-            total_loss += loss.item()
-        if (i % output_step == 0 and is_trn):
+        model.train()
+        loss, portfolio_value = train_one_step(DM, x_window_size, model, loss_compute, local_context_length, device)
+        # total_loss += loss.item()
+        if (i % output_step == 0):
             elapsed = time.time() - start
             print("Epoch Step: %d| Loss per batch: %f| Portfolio_Value: %f | batch per Sec: %f \r\n" %
                   (i, loss.item(), portfolio_value.item(), output_step / elapsed))
             start = time.time()
-        #########################################################tst########################################################
-        with torch.no_grad():
-            if (i % output_step == 0 and evaluate):
+            #########################################################tst########################################################
+            with torch.no_grad():
                 model.eval()
-                # tst_loss, tst_portfolio_value, SR, CR, St_v, tst_pc_array, TO = test_online(DM, x_window_size, model,
-                #                                                                             evaluate_loss_compute,
-                #                                                                             local_context_length,
-                #                                                                             device)
-                # elapsed = time.time() - start
-                # print("Test: %d Loss: %f| Portfolio_Value: %f | SR: %f | CR: %f | TO: %f |testset per Sec: %f" %
-                #       (i, tst_loss.item(), tst_portfolio_value.item(), SR.item(), CR.item(), TO.item(), 1 / elapsed))
-                # start = time.time()
-                # #                portfolio_value_list.append(portfolio_value.item())
-                #
-                # if (tst_portfolio_value > max_tst_portfolio_value):
-                #     max_tst_portfolio_value = tst_portfolio_value
-                #     log_SR = SR
-                #     log_CR = CR
-                #     log_St_v = St_v
-                #     log_tst_pc_array = tst_pc_array
-                #     torch.save(model, model_dir + '/' + str(model_index) + ".pkl")
-
                 tst_loss, tst_portfolio_value = test_batch(DM, x_window_size, model, evaluate_loss_compute,
                                                            local_context_length, device)
-                #                tst_loss, tst_portfolio_value=evaluate_loss_compute(tst_out,tst_trg_y)
                 elapsed = time.time() - start
                 print("Test: %d Loss: %f| Portfolio_Value: %f | testset per Sec: %f \r\n" %
-                      (i, tst_loss, tst_portfolio_value.item(), 1 / elapsed))
+                      (i, tst_loss.item(), tst_portfolio_value.item(), 1 / elapsed))
                 start = time.time()
 
-                if (tst_portfolio_value > max_tst_portfolio_value):
+                log.append({
+                    "time": datetime.now().isoformat(sep=' ', timespec='seconds'),
+                    "epoch": i+1,
+                    "train_loss": loss.item(),
+                    "train_apv": portfolio_value.item(),
+                    "test_loss": tst_loss.item(),
+                    "test_apv": tst_portfolio_value.item()
+                })
+
+                pd.DataFrame(log).to_csv(f"{output_dir}/train_log.csv", index=False)
+
+                if tst_portfolio_value > max_tst_portfolio_value:
                     max_tst_portfolio_value = tst_portfolio_value
-                    torch.save(model, model_dir + '/' + str(model_index) + ".pkl")
-                    #    torch.save(model, model_dir+'/'+str(model_index)+".pkl")
+                    torch.save(model, f"{output_dir}/best_model.pkl")
                     print("save model!")
+
     return tst_loss, tst_portfolio_value
 
 

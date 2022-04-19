@@ -142,8 +142,8 @@ test_loss_compute = SimpleLossCompute_tst(
 
 ##########################train net####################################################
 tst_loss, tst_portfolio_value = train_net(DM, total_step, output_step, x_window_size, local_context_length, model,
-                                          FLAGS.model_dir, FLAGS.model_index, loss_compute, evaluate_loss_compute,
-                                          device, True, True)
+                                          FLAGS.output_dir, loss_compute, evaluate_loss_compute,
+                                          device)
 
 model = torch.load(FLAGS.model_dir + '/' + str(FLAGS.model_index) + '.pkl')
 

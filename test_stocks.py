@@ -10,7 +10,9 @@ from utils.train_test_utils import test_net
 
 test_model_index = 1
 
-model = torch.load(FLAGS.model_dir + '/' + str(test_model_index) + '.pkl')
+run_dir = "./output/20220419_233859"
+
+model = torch.load(run_dir + '/best_model.pkl')
 
 device = "cuda"
 # os.environ["CUDA_VISIBLE_DEVICES"] = "1"S
@@ -26,7 +28,7 @@ tst_portfolio_value, SR, CR, St_v, tst_pc_array, TO = test_net(
     DM, 1, 1, FLAGS.x_window_size, FLAGS.local_context_length, model,
     test_loss_compute, device, False)
 
-csv_dir = FLAGS.log_dir + "/" + "train_summary.csv"
+csv_dir = f"{run_dir}/test_summary.csv"
 d = {"net_dir": [test_model_index],
      "fAPV": [tst_portfolio_value.item()],
      "SR": [SR.item()],

@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 
 import torch
 
@@ -43,10 +44,11 @@ class NoamOpt:
                    (self.model_size ** (-0.5) *
                     min(step ** (-0.5), step * self.warmup ** (-1.5)))
 
-os.makedirs(FLAGS.log_dir, exist_ok=True)
-os.makedirs(FLAGS.model_dir, exist_ok=True)
 
+start_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+output_dir = f'./output/{start_time}/'
 
+os.makedirs(output_dir, exist_ok=True)
 
 
 coin_num = len(DM.global_matrix.coins)  # 11
@@ -85,5 +87,5 @@ evaluate_loss_compute = SimpleLossCompute(
 
 ##########################train net####################################################
 tst_loss, tst_portfolio_value = train_net(DM, FLAGS.total_step, FLAGS.output_step, FLAGS.x_window_size, FLAGS.local_context_length, model,
-                                          FLAGS.model_dir, FLAGS.model_index, loss_compute, evaluate_loss_compute,
-                                          device, True, True)
+                                          output_dir, loss_compute, evaluate_loss_compute,
+                                          device)
