@@ -90,8 +90,8 @@ def test_online(DM, x_window_size, model, evaluate_loss_compute, local_context_l
         out = out[:, :, 1:]  # 去掉cash #[109,1,11]
         tst_previous_w = out
     tst_long_term_w = tst_long_term_w.permute(1, 0, 2, 3)  ##[10,128,1,12]->#[128,10,1,12]
-    tst_loss, tst_portfolio_value, SR, CR, St_v, tst_pc_array, TO = evaluate_loss_compute(tst_long_term_w, tst_trg_y)
-    return tst_loss, tst_portfolio_value, SR, CR, St_v, tst_pc_array, TO
+    tst_loss, portfolio_value_history, rewards, SR, CR, tst_pc_array, TO = evaluate_loss_compute(tst_long_term_w, tst_trg_y)
+    return tst_loss, portfolio_value_history, rewards, SR, CR, tst_pc_array, TO, tst_long_term_w, tst_trg_y
 
 
 def test_net(DM, total_step, output_step, x_window_size, local_context_length, model,
@@ -102,28 +102,23 @@ def test_net(DM, total_step, output_step, x_window_size, local_context_length, m
     total_loss = 0
     tokens = 0
     ####每个epoch开始时previous_w=0
-    max_tst_portfolio_value = 0
 
     #########################################################tst########################################################
     with torch.no_grad():
         model.eval()
-        tst_loss, tst_portfolio_value, SR, CR, St_v, tst_pc_array, TO = test_online(DM, x_window_size, model,
-                                                                                    evaluate_loss_compute,
-                                                                                    local_context_length,
-                                                                                    device)
+        tst_loss, portfolio_value_history, rewards, SR, CR, \
+        tst_pc_array, TO, tst_long_term_w, tst_trg_y = test_online(
+            DM, x_window_size, model, evaluate_loss_compute, local_context_length, device)
         elapsed = time.time() - start
         print("Test Loss: %f| Portfolio_Value: %f | SR: %f | CR: %f | TO: %f |testset per Sec: %f" %
-              (tst_loss.item(), tst_portfolio_value.item(), SR.item(), CR.item(), TO.item(), 1 / elapsed))
+              (tst_loss.item(), portfolio_value_history[-1].item(), SR.item(), CR.item(), TO.item(), 1 / elapsed))
         start = time.time()
         #                portfolio_value_list.append(portfolio_value.item())
 
-        if (tst_portfolio_value > max_tst_portfolio_value):
-            max_tst_portfolio_value = tst_portfolio_value
-            log_SR = SR
-            log_CR = CR
-            log_St_v = St_v
-            log_tst_pc_array = tst_pc_array
-    return max_tst_portfolio_value, log_SR, log_CR, log_St_v, log_tst_pc_array, TO
+        log_SR = SR
+        log_CR = CR
+        log_tst_pc_array = tst_pc_array
+    return portfolio_value_history, rewards, log_SR, log_CR, log_tst_pc_array, TO, tst_long_term_w, tst_trg_y
 
 
 def test_episode(DM, x_window_size, model, evaluate_loss_compute, local_context_length, device):
@@ -248,7 +243,7 @@ def train_net(DM, total_step, output_step, x_window_size, local_context_length, 
 
                 log.append({
                     "time": datetime.now().isoformat(sep=' ', timespec='seconds'),
-                    "epoch": i+1,
+                    "epoch": i + 1,
                     "train_loss": loss.item(),
                     "train_apv": portfolio_value.item(),
                     "test_loss": tst_loss.item(),

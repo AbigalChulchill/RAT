@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import numpy as np
 
 from pgportfolio.tools.indicator import max_drawdown
 
@@ -26,8 +27,8 @@ class SimpleLossCompute_tst:
         self.criterion = criterion
 
     def __call__(self, x, y):
-        loss, portfolio_value, SR, CR, St_v, tst_pc_array, TO = self.criterion(x, y)
-        return loss, portfolio_value, SR, CR, St_v, tst_pc_array, TO
+        loss, portfolio_value, rewards, SR, CR, tst_pc_array, TO = self.criterion(x, y)
+        return loss, portfolio_value, rewards, SR, CR, tst_pc_array, TO
 
 
 class Batch_Loss(nn.Module):
@@ -91,11 +92,10 @@ class Batch_Loss(nn.Module):
 
 
 class Test_Loss(nn.Module):
-    def __init__(self, commission_ratio, interest_rate, device, gamma=0.1, beta=0.1, size_average=True):
+    def __init__(self, commission_ratio, interest_rate, device, gamma=0.1, beta=0.1):
         super(Test_Loss, self).__init__()
         self.gamma = gamma  # variance penalty
         self.beta = beta
-        self.size_average = size_average
         self.commission_ratio = commission_ratio
         self.interest_rate = interest_rate
 
@@ -108,7 +108,7 @@ class Test_Loss(nn.Module):
         ones = ones.to(self.target_device)
         close_price = torch.cat([ones, close_price], 2)  # [128,10,11,1]cat[128,10,1,1]->[128,10,12,1]
         close_price = close_price.to(self.target_device)
-        reward = torch.matmul(w, close_price)  # [128,10,1,12] * [128,10,12,1] ->[128,10,1,1]
+        rewards = torch.matmul(w, close_price)  # [128,10,1,12] * [128,10,12,1] ->[128,10,1,1]
         close_price = close_price.view(close_price.size()[0], close_price.size()[1], close_price.size()[3],
                                        close_price.size()[2])  # [128,10,12,1] -> [128,10,1,12]
         ##############################################################################
@@ -119,7 +119,7 @@ class Test_Loss(nn.Module):
         #        print("interest:",interest.size(),interest,'\r\n')
         interest = torch.sum(interest, 3).unsqueeze(3) * self.interest_rate  # [128,10,1,1]
         ##############################################################################
-        future_omega = w * close_price / reward  # [128,10,1,12]*[128,10,1,12]/[128,10,1,1]
+        future_omega = w * close_price / rewards  # [128,10,1,12]*[128,10,1,12]/[128,10,1,1]
         wt = future_omega[:, :-1]  # [128, 9,1,12]
         wt1 = w[:, 1:]  # [128, 9,1,12]
         pure_pc = 1 - torch.sum(torch.abs(wt - wt1), -1) * self.commission_ratio  # [128,9,1]
@@ -131,32 +131,27 @@ class Test_Loss(nn.Module):
                                pure_pc.size()[2])  # [128,10,1] ->[128,10,1,1]
         cost_penalty = torch.sum(torch.abs(wt - wt1), -1)  # [128, 9, 1]
         ################## Deduct transaction fee ##################
-        reward = reward * pure_pc  # [128,10,1,1]*[128,10,1,1]  test: [1,2808-31,1,1]
+        rewards = rewards * pure_pc  # [128,10,1,1]*[128,10,1,1]  test: [1,2808-31,1,1]
         ################## Deduct loan interest ####################
-        reward = reward + interest
-        if not self.size_average:
-            tst_pc_array = reward.squeeze()
-            sr_reward = tst_pc_array - 1
-            SR = sr_reward.mean() / sr_reward.std()
-            #            print("SR:",SR.size(),"reward.mean():",reward.mean(),"reward.std():",reward.std())
-            SN = torch.prod(reward, 1)  # [1,1,1,1]
-            SN = SN.squeeze()  #
-            #            print("SN:",SN.size())
-            St_v = []
-            St = 1.
-            MDD = max_drawdown(tst_pc_array)
-            for k in range(reward.size()[1]):  # 2808-31
-                St *= reward[0, k, 0, 0]
-                St_v.append(St.item())
-            CR = SN / MDD
-            TO = cost_penalty.mean()
-        ##############################################
-        portfolio_value = torch.prod(reward, 1)  # [128,1,1]
-        batch_loss = -torch.log(portfolio_value)  # [128,1,1]
+        rewards = rewards + interest
 
-        if self.size_average:
-            loss = batch_loss.mean()
-            return loss, portfolio_value.mean()
-        else:
-            loss = batch_loss.mean()
-            return loss, portfolio_value[0][0][0], SR, CR, St_v, tst_pc_array, TO
+        # Difference from train loss start {
+        tst_pc_array = rewards.squeeze()
+        sr_reward = tst_pc_array - 1
+        SR = sr_reward.mean() / sr_reward.std()
+        #            print("SR:",SR.size(),"reward.mean():",reward.mean(),"reward.std():",reward.std())
+        SN = torch.prod(rewards, 1)  # [1,1,1,1]
+        SN = SN.squeeze()  #
+        #            print("SN:",SN.size())
+        MDD = max_drawdown(tst_pc_array)
+        CR = SN / MDD
+        TO = cost_penalty.mean()
+        # } Difference from train loss end
+
+
+        ##############################################
+        portfolio_value_history = np.cumprod(rewards, axis=1).squeeze()
+        batch_loss = -torch.log(portfolio_value_history[-1])  # [128,1,1]
+
+        loss = batch_loss.mean()
+        return loss, portfolio_value_history, rewards.squeeze(), SR, CR, tst_pc_array, TO

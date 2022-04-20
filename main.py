@@ -150,16 +150,16 @@ model = torch.load(FLAGS.model_dir + '/' + str(FLAGS.model_index) + '.pkl')
 model = model.to(device)
 
 ##########################test net#####################################################
-tst_portfolio_value, SR, CR, St_v, tst_pc_array, TO = test_net(DM, 1, 1, x_window_size, local_context_length, model,
-                                                               test_loss_compute, device, True)
+portfolio_value_history, rewards, SR, CR, tst_pc_array, TO, tst_long_term_w, tst_trg_y = test_net(
+    DM, 1, 1, x_window_size, local_context_length, model, test_loss_compute, device, True)
 
 csv_dir = FLAGS.log_dir + "/" + "train_summary.csv"
 d = {"net_dir": [FLAGS.model_index],
-     "fAPV": [tst_portfolio_value.item()],
+     "fAPV": [portfolio_value_history[-1].item()],
      "SR": [SR.item()],
      "CR": [CR.item()],
      "TO": [TO.item()],
-     "St_v": [''.join(str(e) + ', ' for e in St_v)],
+     "St_v": [''.join(str(e) + ', ' for e in portfolio_value_history)],
      "backtest_test_history": [''.join(str(e) + ', ' for e in tst_pc_array.cpu().numpy())],
      }
 new_data_frame = pd.DataFrame(data=d).set_index("net_dir")
